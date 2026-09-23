@@ -1,0 +1,61 @@
+{
+  "bundle": "/home/ubuntu/karim/rl_runs/grpo_round1/bundle",
+  "weights": "GRPO round 1, step 120 (conditioner + instruction projector); voice encoder from RAFT round 0 step 128; backbone unchanged",
+  "mode": "design",
+  "sample_voices": false,
+  "note": "One prompt, ten random seeds. Voicebook drawing is off, so all ten are the same voice giving different takes.",
+  "text": "I left the keys on the kitchen table, and the back door is already unlocked, so let yourself in.",
+  "instruction": "A calm middle-aged woman, speaking softly and unhurried, warm and a little tired.",
+  "clips": [
+    {
+      "file": "clip_01.wav",
+      "seed": 76871,
+      "seconds": 8.48
+    },
+    {
+      "file": "clip_02.wav",
+      "seed": 61137,
+      "seconds": 8.24
+    },
+    {
+      "file": "clip_03.wav",
+      "seed": 204421,
+      "seconds": 6.72
+    },
+    {
+      "file": "clip_04.wav",
+      "seed": 227650,
+      "seconds": 8.64
+    },
+    {
+      "file": "clip_05.wav",
+      "seed": 937677,
+      "seconds": 7.36
+    },
+    {
+      "file": "clip_06.wav",
+      "seed": 958049,
+      "seconds": 8.56
+    },
+    {
+      "file": "clip_07.wav",
+      "seed": 805284,
+      "seconds": 7.76
+    },
+    {
+      "file": "clip_08.wav",
+      "seed": 550715,
+      "seconds": 7.92
+    },
+    {
+      "file": "clip_09.wav",
+      "seed": 958034,
+      "seconds": 7.76
+    },
+    {
+      "file": "clip_10.wav",
+      "seed": 210132,
+      "seconds": 7.84
+    }
+  ]
+}

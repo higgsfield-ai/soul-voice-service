@@ -1,0 +1,66 @@
+[project]
+name = "soul-voice"
+version = "0.1.0"
+description = "Soul Voice inference and SQS/S3 service"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+# Repository code only. The backbone, Qwen codec and bundle weights carry their
+# own licenses, which this does not relicense.
+license = "MIT"
+dependencies = [
+    "torch==2.9.1",
+    "torchaudio==2.9.1",
+    "transformers==4.57.3",
+    "numpy>=2.0,<3",
+    # The codec: tokenizes target audio and decodes frames back to a waveform.
+    "qwen-tts==0.1.1",
+    # Reading reference recordings for clone and direction.
+    "soundfile>=0.13",
+    "scipy>=1.10",
+    "boto3>=1.35,<2",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1,<2",
+]
+
+[project.optional-dependencies]
+# Only the parity check needs these, and only to load the research pipeline it
+# compares against. Serving does not.
+parity = ["polars", "pyarrow", "PyYAML"]
+
+[tool.poetry]
+packages = [{ include = "soul_voice" }, { include = "voice_service" }]
+
+[dependency-groups]
+# Transport tests run on a laptop without installing torch or loading weights.
+test = [
+    "pytest>=8,<10", "moto[s3,sqs]>=5,<6", "ruff>=0.12",
+    "boto3>=1.35,<2", "pydantic>=2.10,<3", "python-dotenv>=1,<2",
+    "numpy>=2.0,<3", "soundfile>=0.13",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
+include = ["voice_service/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,22 @@
+{
+  "job_id": "voice-clone-001",
+  "task_type": "voice",
+  "s3_region": "eu-north-1",
+  "sqs_region": "eu-north-1",
+  "result_queue_url": "https://sqs.eu-north-1.amazonaws.com/ACCOUNT_ID/voice-results",
+  "dst_bucket_audio_pair": [
+    "YOUR_MEDIA_BUCKET",
+    "voice-tests/clone/audio.wav"
+  ],
+  "voice_config": {
+    "text": "We go live in thirty seconds.",
+    "instruction": "A warm, calm female voice, speaking clearly and unhurriedly.",
+    "mode": "clone",
+    "seed": 4242,
+    "style_mix_alpha": 1.0
+  },
+  "src_bucket_audio_pair": [
+    "YOUR_MEDIA_BUCKET",
+    "voice-tests/reference.wav"
+  ]
+}
