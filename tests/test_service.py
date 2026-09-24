@@ -1,7 +1,6 @@
 import json
-from dataclasses import dataclass
+from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -10,9 +9,7 @@ import soundfile as sf
 from botocore.exceptions import EndpointConnectionError
 from pydantic import ValidationError
 
-from voice_service.engine import VoiceEngine
 from voice_service.schema import Payload
-from voice_service.settings import Settings
 from voice_service.storage import Storage
 from voice_service.worker import VisibilityLease
 
@@ -176,27 +173,19 @@ def test_lost_lease_does_not_publish_completion_or_ack(cloud, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["design", "clone", "direction"])
-def test_adapter_preserves_config_and_float_samples(payload, tmp_path, mode):
+def test_adapter_preserves_config_and_float_samples(payload, tmp_path, mode, adapter):
     payload["voice_config"].update(mode=mode, style_mix_alpha=0.35)
     payload["src_bucket_audio_pair"] = ["voice-test-media", "reference.wav"]
     samples = np.array([-1.2, -0.5, 0, 0.6, 1.3], dtype=np.float32)
 
-    @dataclass
-    class Sampling:
-        max_new_tokens: int = 1024
-
-    engine = VoiceEngine.__new__(VoiceEngine)
-    engine.settings = Settings()
-    engine.request_type = SimpleNamespace
-    engine.consumer = SimpleNamespace(
-        synthesize=Mock(return_value=[samples]), sampling=Sampling(), manifest={"version": "fixture"}
-    )
+    engine = adapter
+    engine.consumer.synthesize.return_value = [samples]
     reference = None if mode == "design" else Path("reference.wav")
     output = tmp_path / "audio.wav"
     metadata = engine.render(Payload.model_validate(payload), reference, output)
     request = engine.consumer.synthesize.call_args.args[0][0]
     assert vars(request) == {
-        **Payload.model_validate(payload).voice_config.model_dump(),
+        **Payload.model_validate(payload).voice_config.model_dump(exclude_none=True),
         "reference": reference,
     }
     decoded, rate = sf.read(output, dtype="float32")
@@ -204,13 +193,13 @@ def test_adapter_preserves_config_and_float_samples(payload, tmp_path, mode):
     assert rate == 24000
     assert metadata["voice_config"]["style_mix_alpha"] == 0.35
     assert metadata["samples"] == len(samples)
+    assert metadata["sampling"] == asdict(engine.consumer.sampling)
 
 
 @pytest.mark.parametrize("samples", [[], [float("nan")], [[0.1, 0.2]]])
-def test_adapter_rejects_broken_model_audio(payload, tmp_path, samples):
-    engine = VoiceEngine.__new__(VoiceEngine)
-    engine.request_type = SimpleNamespace
-    engine.consumer = SimpleNamespace(synthesize=Mock(return_value=[samples]))
+def test_adapter_rejects_broken_model_audio(payload, tmp_path, samples, adapter):
+    engine = adapter
+    engine.consumer.synthesize.return_value = [samples]
     with pytest.raises(RuntimeError, match="audio"):
         engine.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
 

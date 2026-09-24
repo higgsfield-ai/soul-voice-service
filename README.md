@@ -39,6 +39,12 @@ queue specified by `result_queue_url`. These are separate queues.
 | `voice_config.mode` | `design` (default), `clone`, or `direction`. |
 | `voice_config.seed` | Random seed, 0 through 2³²−1; default 0. |
 | `voice_config.style_mix_alpha` | For direction: 0 uses reference delivery, 1 uses instructed delivery, intermediate values blend. Default 1; ignored by clone/design. |
+| `voice_config.temperature` | Sampling temperature for the backbone; positive, default 0.9. |
+| `voice_config.top_k` | Number of candidate tokens retained for backbone sampling; default 50. Use 0 to disable the top-k cutoff. |
+| `voice_config.depth_temperature` | Sampling temperature for the depth decoder; positive, default 0.9. |
+| `voice_config.depth_top_k` | Candidate-token cutoff for the depth decoder; default 50. Use 0 to disable it. |
+| `voice_config.guidance_scale` | Strength of guidance from the instructed prompt; default 2.5. A value of 1 disables the guidance branch. |
+| `voice_config.max_new_tokens` | Positive generation-token limit for this job. Defaults to `VOICE_MAX_NEW_TOKENS` (1024 unless configured). |
 | `src_bucket_audio_pair` | `[bucket, key]` of reference audio; required for clone/direction, unused by design. Use WAV or FLAC readable by libsndfile. |
 | `dst_bucket_audio_pair` | `[bucket, key]` for the generated WAV; required. |
 | `dst_bucket_metadata_pair` | Optional `[bucket, key]` for metadata. Default: audio key plus `.json`. |
@@ -50,10 +56,18 @@ identity comes from the reference while delivery is blended with the instruction
 The original inference code converts reference audio to mono 24 kHz and uses a
 seeded crop of up to eight seconds. The service does not pre-crop it differently.
 
-One request produces one utterance. Defaults match the supplied consumer:
-guidance 2.5, temperature 0.9, top-k 50, depth temperature 0.9, depth top-k 50,
-and at most 1,024 generation tokens. `VOICE_MAX_NEW_TOKENS` changes that cap for
-the worker. Long text can reach the cap; there is no automatic sentence splitting.
+One request produces one utterance. All six sampling settings are optional fields
+inside `voice_config`; omitted or null values inherit the supplied consumer's
+defaults. `VOICE_MAX_NEW_TOKENS` sets the worker's default generation limit, and
+`voice_config.max_new_tokens` takes precedence for that job. The environment value
+is a default, not a hard upper bound. Long text can reach the generation limit;
+there is no automatic sentence splitting.
+
+For example, add `"temperature": 0.8`, `"top_k": 40`, or `"guidance_scale": 2.0`
+alongside `text` and `mode` in `voice_config`. Settings apply to that job only,
+including after a failed generation. Metadata's `sampling` object records the
+effective values used, including defaults; `voice_config` retains the request's
+options. The original inference package applies these settings.
 
 See ready-to-edit [design](examples/design.json), [clone](examples/clone.json)
 and [direction](examples/direction.json) payloads. The full machine-readable
@@ -117,6 +131,22 @@ its files and the shared Breeze backbone, text tokenizer and Qwen audio codec,
 including sizes and SHA-256 checksums. The older `base` and `raft` bundles remain
 available locally but are not needed by this default service. Model weights and
 credentials are excluded from Git and Docker build contexts.
+
+A bundle is a saved training version of the voice-conditioning components, not a
+different task. All three supplied bundles can serve design, clone and direction:
+
+| Bundle | Training version |
+| --- | --- |
+| `base` | Stage-3 v5 phase-3 checkpoint, step 2000. |
+| `raft` | RAFT round-0 refinement of `base`, step 128. |
+| `round1` | GRPO round-1 refinement of `raft`, step 120; the service default. |
+
+They share `shared/backbone` and `shared/base_checkpoint` (tokenizer and codec).
+Set `VOICE_BUNDLE=checkpoints/raft`, for example, to select another supplied version
+when starting the worker. This requires that bundle's files to be provisioned too:
+changing the environment variable alone does not change `models.json` or download
+additional weights. The current inventory provisions `round1` and its shared
+dependencies. Bundle selection applies to the worker, not individual jobs.
 
 The public Breeze inference source is vendored, unmodified, at a fixed revision
 under `third_party/breeze-tts`; see [third_party/README.md](third_party/README.md).
@@ -198,10 +228,21 @@ docker compose run --rm --no-deps worker python -m voice_service.models verify
 docker compose up -d --no-deps worker
 ```
 
-`VOICE_DEPTH=fused` and `VOICE_COMPILE=false` are the defaults. The original
-`shipped` decoder can be selected for reference comparisons. Compilation is opt-in
-because initial CUDA graph capture is expensive. `compile_requested` in metadata
-records the requested setting, not a guarantee that capture succeeded.
+`VOICE_DEPTH=fused` and `VOICE_COMPILE=false` are the defaults. All original depth
+decoder choices are available as worker settings:
+
+| `VOICE_DEPTH` | Behavior |
+| --- | --- |
+| `fused` | Runs the two guidance branches together; original consumer default. |
+| `cached` | Incremental depth decoding with a KV cache. |
+| `shipped` | Original upstream decoding loop, used for reference comparisons. |
+
+These are execution options for the same model weights; they require no additional
+checkpoint. Different decoders can produce different sampled audio with the same
+seed, as described in the original inference documentation. `VOICE_COMPILE=true`
+enables the original optional compilation path; initial capture is expensive.
+`compile_requested` in metadata records the requested setting, not a guarantee that
+capture succeeded. Restart the worker after changing these environment settings.
 
 The input queue needs ReceiveMessage, DeleteMessage and ChangeMessageVisibility;
 the result queue needs SendMessage. Media access needs S3 GetObject on references
@@ -240,6 +281,11 @@ These tests use emulated AWS and a synthesis double. They exercise S3 uploads,
 metadata, SQS status/ack order, retries, reference routing, all three modes,
 validation, float WAV preservation and atomic/checksummed model downloads. They
 are not proof of voice quality or training-pipeline parity.
+
+They also check per-job sampling overrides, restoration between jobs and decoder
+selection. With the full inference dependencies installed, an additional CPU check
+exercises the original consumer's sampling-configuration hook without loading
+weights. That check is skipped with the lightweight test environment.
 
 On a GPU host, install the full locked environment and render without queues:
 

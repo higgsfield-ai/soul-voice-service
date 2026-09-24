@@ -1,6 +1,6 @@
 """Translate a service request into the existing, unmodified inference API."""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from time import perf_counter
 
@@ -35,9 +35,23 @@ class VoiceEngine:
 
     def render(self, payload: Payload, reference: Path | None, output: Path) -> dict:
         config = payload.voice_config
-        request = self.request_type(**config.model_dump(), reference=reference)
+        values = config.model_dump()
+        previous_sampling = self.consumer.sampling
+        overrides = {name: values.pop(name) for name in asdict(previous_sampling)}
+        sampling = replace(
+            previous_sampling, **{name: value for name, value in overrides.items() if value is not None}
+        )
+        request = self.request_type(**values, reference=reference)
         start = perf_counter()
-        (audio,) = self.consumer.synthesize([request], batch_size=1)
+        # The worker calls this sequentially. Restore both the consumer settings
+        # and the backbone/depth generation configs before processing another job.
+        self.consumer.sampling = sampling
+        try:
+            self.consumer._apply_sampling()
+            (audio,) = self.consumer.synthesize([request], batch_size=1)
+        finally:
+            self.consumer.sampling = previous_sampling
+            self.consumer._apply_sampling()
         inference_seconds = perf_counter() - start
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 1 or audio.size == 0 or not np.isfinite(audio).all():
@@ -47,9 +61,9 @@ class VoiceEngine:
         return {
             "schema_version": 1,
             "task_type": "voice",
-            "voice_config": config.model_dump(mode="json"),
+            "voice_config": config.model_dump(mode="json", exclude_none=True),
             "model_version": self.consumer.manifest["version"],
-            "sampling": asdict(self.consumer.sampling),
+            "sampling": asdict(sampling),
             "depth": self.settings.depth,
             "compile_requested": self.settings.compile,
             "sample_voices": False,

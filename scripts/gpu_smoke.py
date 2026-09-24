@@ -8,6 +8,7 @@ This needs no AWS credentials and does not send queue messages.
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -37,9 +38,17 @@ def main():
         output = args.output / f"{mode}.wav"
         metadata = engine.render(payload, reference, output)
         saved, rate = sf.read(output, dtype="float32")
-        (direct,) = engine.consumer.synthesize(
-            [engine.request_type(**payload.voice_config.model_dump(), reference=reference)], batch_size=1
-        )
+        previous_sampling = engine.consumer.sampling
+        engine.consumer.sampling = replace(previous_sampling, **metadata["sampling"])
+        try:
+            engine.consumer._apply_sampling()
+            request = engine.request_type(
+                **payload.voice_config.model_dump(exclude=set(metadata["sampling"])), reference=reference
+            )
+            (direct,) = engine.consumer.synthesize([request], batch_size=1)
+        finally:
+            engine.consumer.sampling = previous_sampling
+            engine.consumer._apply_sampling()
         np.testing.assert_array_equal(saved, direct)
         assert rate == 24000 and np.isfinite(saved).all() and np.any(saved != 0)
         Path(str(output) + ".json").write_text(json.dumps(metadata, indent=2) + "\n")

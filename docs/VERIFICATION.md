@@ -2,10 +2,19 @@
 
 Local checks completed on 2026-09-23:
 
-- 46 tests passed using emulated SQS/S3 and a synthesis double: all three modes,
+- 67 tests passed, primarily using emulated SQS/S3 and a synthesis double: all three modes,
   references, metadata/result consistency, status publication before acknowledgement,
   failure and retry paths, visibility lease failure, FIFO result publication,
   float WAV preservation and checksummed model publishing/downloading.
+- Sampling controls are checked for per-job overrides, default preservation,
+  zero top-k cutoffs, effective metadata values, and restoration after generation
+  succeeds or fails. All three decoder modes (`fused`, `cached`, `shipped`) and
+  compilation flags are checked at the original loader boundary.
+- With the inference dependencies installed, a CPU check exercises the original
+  `VoiceConsumer._apply_sampling()` against model configuration objects and confirms
+  that both backbone and depth settings are applied and restored. This does not
+  run the neural network or establish GPU/audio correctness. That check is skipped
+  when running with only the lightweight test dependencies.
 - Ruff lint and formatting checks passed for the new service, tests and GPU helper.
 - The supplied `soul_voice` source files are unchanged.
 - The default model inventory contains 24 files and 8,537,540,386 bytes, including

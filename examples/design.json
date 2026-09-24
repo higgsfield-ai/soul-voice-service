@@ -13,6 +13,12 @@
     "instruction": "A warm, calm female voice, speaking clearly and unhurriedly.",
     "mode": "design",
     "seed": 4242,
-    "style_mix_alpha": 1.0
+    "style_mix_alpha": 1.0,
+    "temperature": 0.8,
+    "top_k": 40,
+    "depth_temperature": 0.9,
+    "depth_top_k": 50,
+    "guidance_scale": 2.0,
+    "max_new_tokens": 512
   }
 }

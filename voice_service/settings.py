@@ -25,8 +25,8 @@ class Settings:
     def __post_init__(self):
         if not 30 <= self.visibility_timeout <= 43200:
             raise ValueError("SQS_VISIBILITY_TIMEOUT must be between 30 and 43200 seconds")
-        if self.depth not in {"shipped", "fused"}:
-            raise ValueError("VOICE_DEPTH must be shipped or fused")
+        if self.depth not in {"shipped", "cached", "fused"}:
+            raise ValueError("VOICE_DEPTH must be shipped, cached or fused")
         if self.max_new_tokens < 1:
             raise ValueError("VOICE_MAX_NEW_TOKENS must be positive")
 

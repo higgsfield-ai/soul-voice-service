@@ -1,5 +1,7 @@
 import json
+from dataclasses import asdict, dataclass
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import boto3
 import numpy as np
@@ -7,8 +9,48 @@ import pytest
 import soundfile as sf
 from moto import mock_aws
 
+from voice_service.engine import VoiceEngine
 from voice_service.settings import Settings
 from voice_service.worker import Worker
+
+
+@dataclass
+class StubSampling:
+    temperature: float = 0.9
+    top_k: int = 50
+    depth_temperature: float = 0.9
+    depth_top_k: int = 50
+    guidance_scale: float = 2.5
+    max_new_tokens: int = 1024
+
+
+@dataclass
+class StubRequest:
+    text: str
+    instruction: str
+    mode: str = "design"
+    reference: object = None
+    seed: int = 0
+    style_mix_alpha: float = 1.0
+
+
+@pytest.fixture
+def adapter():
+    engine = VoiceEngine.__new__(VoiceEngine)
+    engine.settings = Settings()
+    engine.request_type = StubRequest
+    engine.consumer = SimpleNamespace(
+        sampling=StubSampling(),
+        manifest={"version": "fixture"},
+        synthesize=Mock(return_value=[np.zeros(24, dtype=np.float32)]),
+    )
+
+    def apply_sampling():
+        engine.consumer.applied_sampling = asdict(engine.consumer.sampling)
+
+    engine.consumer._apply_sampling = Mock(side_effect=apply_sampling)
+    apply_sampling()
+    return engine
 
 
 @pytest.fixture
