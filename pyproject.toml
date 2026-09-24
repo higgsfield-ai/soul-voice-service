@@ -28,7 +28,7 @@ dependencies = [
 parity = ["polars", "pyarrow", "PyYAML"]
 
 [tool.poetry]
-packages = [{ include = "soul_voice" }, { include = "voice_service" }]
+packages = [{ include = "soul_voice" }, { include = "src" }]
 
 [dependency-groups]
 # Transport tests run on a laptop without installing torch or loading weights.
@@ -44,7 +44,10 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 110
-include = ["voice_service/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+include = ["src/**/*.py", "tests/**/*.py", "scripts/**/*.py", "test_payload.py", "test_voice_local.py"]
+
+[tool.ruff.format]
+quote-style = "single"
 
 [tool.uv]
 environments = [

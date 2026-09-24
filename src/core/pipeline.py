@@ -7,19 +7,19 @@ from time import perf_counter
 import numpy as np
 import soundfile as sf
 
-from .schema import Checkpoint, Payload
-from .settings import Settings
+from src.schemas.voice import Checkpoint, VoiceConfig
+from src.settings import Settings, settings
 
 
-class VoiceEngine:
-    def __init__(self, settings: Settings):
+class Pipeline:
+    def __init__(self, settings: Settings = settings):
         # Keep torch and the GPU model out of transport and download tools.
         import torch
 
         from soul_voice import Request, Sampling, VoiceConsumer
 
-        if not settings.device.startswith("cuda") or not torch.cuda.is_available():
-            raise RuntimeError("Soul Voice inference requires an NVIDIA CUDA GPU")
+        if not settings.device.startswith('cuda') or not torch.cuda.is_available():
+            raise RuntimeError('Soul Voice inference requires an NVIDIA CUDA GPU')
         self.settings = settings
         self.request_type = Request
         self.consumer_type = VoiceConsumer
@@ -42,10 +42,9 @@ class VoiceEngine:
             )
         return self.consumers[checkpoint]
 
-    def render(self, payload: Payload, reference: Path | None, output: Path) -> dict:
-        config = payload.voice_config
+    def __call__(self, reference: Path | None, output: Path, config: VoiceConfig) -> dict:
         values = config.model_dump()
-        consumer = self.get_consumer(values.pop("checkpoint"))
+        consumer = self.get_consumer(values.pop('checkpoint'))
         previous_sampling = consumer.sampling
         overrides = {name: values.pop(name) for name in asdict(previous_sampling)}
         sampling = replace(
@@ -65,22 +64,22 @@ class VoiceEngine:
         inference_seconds = perf_counter() - start
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 1 or audio.size == 0 or not np.isfinite(audio).all():
-            raise RuntimeError("model returned empty, non-finite or non-mono audio")
+            raise RuntimeError('model returned empty, non-finite or non-mono audio')
         # FLOAT preserves generated samples without PCM16 clipping or rounding.
-        sf.write(output, audio, 24000, format="WAV", subtype="FLOAT")
+        sf.write(output, audio, 24000, format='WAV', subtype='FLOAT')
         return {
-            "schema_version": 1,
-            "task_type": "voice",
-            "voice_config": config.model_dump(mode="json", exclude_none=True),
-            "model_version": consumer.manifest["version"],
-            "sampling": asdict(sampling),
-            "depth": self.settings.depth,
-            "compile_requested": self.settings.compile,
-            "sample_voices": False,
-            "sample_rate": 24000,
-            "channels": 1,
-            "samples": int(audio.size),
-            "duration_seconds": audio.size / 24000,
-            "inference_seconds": inference_seconds,
-            "peak_amplitude": float(np.abs(audio).max()),
+            'schema_version': 1,
+            'task_type': 'voice',
+            'voice_config': config.model_dump(mode='json', exclude_none=True),
+            'model_version': consumer.manifest['version'],
+            'sampling': asdict(sampling),
+            'depth': self.settings.depth,
+            'compile_requested': self.settings.compile,
+            'sample_voices': False,
+            'sample_rate': 24000,
+            'channels': 1,
+            'samples': int(audio.size),
+            'duration_seconds': audio.size / 24000,
+            'inference_seconds': inference_seconds,
+            'peak_amplitude': float(np.abs(audio).max()),
         }

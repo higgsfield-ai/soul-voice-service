@@ -1,22 +1,13 @@
 services:
-  download-models:
+  soul-voice-service:
     build: .
     image: soul-voice:local
-    env_file: .env
-    volumes:
-      - ./checkpoints:/app/checkpoints
-    command: ["python", "-m", "voice_service.models", "download"]
-
-  worker:
-    build: .
-    image: soul-voice:local
-    env_file: .env
-    volumes:
-      - ./checkpoints:/app/checkpoints:ro
+    command: python -m src.main
+    restart: unless-stopped
     gpus: all
     init: true
-    restart: unless-stopped
     stop_grace_period: 15m
-    depends_on:
-      download-models:
-        condition: service_completed_successfully
+    volumes:
+      - '${VOICE_MODELS_HOST_DIR:-./checkpoints}:/app/checkpoints:ro'
+    env_file:
+      - .env

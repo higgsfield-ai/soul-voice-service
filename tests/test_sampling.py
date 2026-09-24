@@ -7,146 +7,145 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from voice_service.engine import VoiceEngine
-from voice_service.schema import Payload
-from voice_service.settings import Settings
+from src.core.pipeline import Pipeline
+from src.schemas import Payload
+from src.settings import Settings
 
 
-@pytest.mark.parametrize("mode", ["design", "clone", "direction"])
+@pytest.mark.parametrize('mode', ['design', 'clone', 'direction'])
 def test_sampling_overrides_apply_only_to_current_job(payload, tmp_path, adapter, mode):
-    payload["voice_config"]["mode"] = mode
-    payload["src_bucket_audio_pair"] = ["voice-test-media", "reference.wav"]
-    defaults = adapter.get_consumer("round1").sampling
+    payload['voice_config']['mode'] = mode
+    payload['src_bucket_audio_pair'] = ['voice-test-media', 'reference.wav']
+    defaults = adapter.get_consumer('round1').sampling
     overrides = {
-        "temperature": 0.7,
-        "top_k": 30,
-        "depth_temperature": 0.8,
-        "depth_top_k": 20,
-        "guidance_scale": 1.0,
-        "max_new_tokens": 128,
+        'temperature': 0.7,
+        'top_k': 30,
+        'depth_temperature': 0.8,
+        'depth_top_k': 20,
+        'guidance_scale': 1.0,
+        'max_new_tokens': 128,
     }
     original = Payload.model_validate(payload)
-    payload["voice_config"].update(overrides)
+    payload['voice_config'].update(overrides)
     observed = []
 
     def synthesize(*_args, **_kwargs):
         observed.append(
             (
-                asdict(adapter.get_consumer("round1").sampling),
-                adapter.get_consumer("round1").applied_sampling.copy(),
+                asdict(adapter.get_consumer('round1').sampling),
+                adapter.get_consumer('round1').applied_sampling.copy(),
             )
         )
         return [np.zeros(24, dtype=np.float32)]
 
-    adapter.get_consumer("round1").synthesize.side_effect = synthesize
-    reference = None if mode == "design" else tmp_path / "reference.wav"
-    metadata = adapter.render(Payload.model_validate(payload), reference, tmp_path / "custom.wav")
+    adapter.get_consumer('round1').synthesize.side_effect = synthesize
+    reference = None if mode == 'design' else tmp_path / 'reference.wav'
+    metadata = adapter(
+        reference, tmp_path / 'custom.wav', config=(Payload.model_validate(payload)).voice_config
+    )
     assert observed == [(overrides, overrides)]
-    assert metadata["sampling"] == overrides
-    assert all(metadata["voice_config"][key] == value for key, value in overrides.items())
-    assert adapter.get_consumer("round1").sampling is defaults
-    assert adapter.get_consumer("round1").applied_sampling == asdict(defaults)
+    assert metadata['sampling'] == overrides
+    assert all(metadata['voice_config'][key] == value for key, value in overrides.items())
+    assert adapter.get_consumer('round1').sampling is defaults
+    assert adapter.get_consumer('round1').applied_sampling == asdict(defaults)
     # An ordinary request after an overridden one must still use the original defaults.
-    metadata = adapter.render(original, reference, tmp_path / "default.wav")
+    metadata = adapter(reference, tmp_path / 'default.wav', config=(original).voice_config)
     assert observed[-1] == (asdict(defaults), asdict(defaults))
-    assert metadata["sampling"] == asdict(defaults)
+    assert metadata['sampling'] == asdict(defaults)
 
 
 def test_sampling_restored_after_inference_failure(payload, tmp_path, adapter):
-    defaults = adapter.get_consumer("round1").sampling
-    payload["voice_config"].update(temperature=0.6, guidance_scale=1.0, max_new_tokens=64)
-    adapter.get_consumer("round1").synthesize.side_effect = RuntimeError("synthesis failed")
-    with pytest.raises(RuntimeError, match="synthesis failed"):
-        adapter.render(Payload.model_validate(payload), None, tmp_path / "failed.wav")
-    assert adapter.get_consumer("round1").sampling is defaults
-    assert adapter.get_consumer("round1").applied_sampling == asdict(defaults)
+    defaults = adapter.get_consumer('round1').sampling
+    payload['voice_config'].update(temperature=0.6, guidance_scale=1.0, max_new_tokens=64)
+    adapter.get_consumer('round1').synthesize.side_effect = RuntimeError('synthesis failed')
+    with pytest.raises(RuntimeError, match='synthesis failed'):
+        adapter(None, tmp_path / 'failed.wav', config=(Payload.model_validate(payload)).voice_config)
+    assert adapter.get_consumer('round1').sampling is defaults
+    assert adapter.get_consumer('round1').applied_sampling == asdict(defaults)
 
 
 def test_partial_sampling_override_keeps_worker_defaults(payload, tmp_path, adapter):
-    adapter.get_consumer("round1").sampling = replace(
-        adapter.get_consumer("round1").sampling, max_new_tokens=256
+    adapter.get_consumer('round1').sampling = replace(
+        adapter.get_consumer('round1').sampling, max_new_tokens=256
     )
-    payload["voice_config"].update(top_k=0, depth_top_k=0)
-    metadata = adapter.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
-    assert metadata["sampling"] == {
-        "temperature": 0.9,
-        "top_k": 0,
-        "depth_temperature": 0.9,
-        "depth_top_k": 0,
-        "guidance_scale": 2.5,
-        "max_new_tokens": 256,
+    payload['voice_config'].update(top_k=0, depth_top_k=0)
+    metadata = adapter(None, tmp_path / 'audio.wav', config=(Payload.model_validate(payload)).voice_config)
+    assert metadata['sampling'] == {
+        'temperature': 0.9,
+        'top_k': 0,
+        'depth_temperature': 0.9,
+        'depth_top_k': 0,
+        'guidance_scale': 2.5,
+        'max_new_tokens': 256,
     }
 
 
 def test_null_sampling_values_use_defaults(payload, tmp_path, adapter):
-    defaults = asdict(adapter.get_consumer("round1").sampling)
-    payload["voice_config"].update({name: None for name in defaults})
-    metadata = adapter.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
-    assert metadata["sampling"] == defaults
+    defaults = asdict(adapter.get_consumer('round1').sampling)
+    payload['voice_config'].update({name: None for name in defaults})
+    metadata = adapter(None, tmp_path / 'audio.wav', config=(Payload.model_validate(payload)).voice_config)
+    assert metadata['sampling'] == defaults
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    'field,value',
     [
-        ("temperature", 0),
-        ("temperature", -1),
-        ("temperature", float("inf")),
-        ("depth_temperature", 0),
-        ("top_k", -1),
-        ("depth_top_k", -1),
-        ("guidance_scale", float("nan")),
-        ("max_new_tokens", 0),
+        ('temperature', 0),
+        ('temperature', -1),
+        ('temperature', float('inf')),
+        ('depth_temperature', 0),
+        ('top_k', -1),
+        ('depth_top_k', -1),
+        ('guidance_scale', float('nan')),
+        ('max_new_tokens', 0),
     ],
 )
 def test_invalid_sampling_values(payload, field, value):
-    payload["voice_config"][field] = value
+    payload['voice_config'][field] = value
     with pytest.raises(ValidationError):
         Payload.model_validate(payload)
 
 
-@pytest.mark.parametrize("depth", ["fused", "cached", "shipped"])
-@pytest.mark.parametrize("compile", [False, True])
+@pytest.mark.parametrize('depth', ['fused', 'cached', 'shipped'])
+@pytest.mark.parametrize('compile', [False, True])
 def test_all_decoder_options_reach_original_loader(monkeypatch, adapter, depth, compile):
-    load = Mock(return_value=adapter.get_consumer("round1"))
+    load = Mock(return_value=adapter.get_consumer('round1'))
     monkeypatch.setitem(
         sys.modules,
-        "torch",
+        'torch',
         SimpleNamespace(
-            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda _: "test-gpu")
+            cuda=SimpleNamespace(is_available=lambda: True, get_device_name=lambda _: 'test-gpu')
         ),
     )
     monkeypatch.setitem(
         sys.modules,
-        "soul_voice",
+        'soul_voice',
         SimpleNamespace(
             Request=adapter.request_type,
-            Sampling=type(adapter.get_consumer("round1").sampling),
+            Sampling=type(adapter.get_consumer('round1').sampling),
             VoiceConsumer=SimpleNamespace(load=load),
         ),
     )
-    monkeypatch.setenv("VOICE_DEPTH", depth)
-    monkeypatch.setenv("VOICE_COMPILE", str(compile).lower())
-    monkeypatch.setenv("VOICE_MAX_NEW_TOKENS", "256")
-    engine = VoiceEngine(Settings.from_env())
+    engine = Pipeline(Settings(depth=depth, compile=compile, max_new_tokens=256))
     load.assert_not_called()
-    engine.get_consumer("round1")
-    assert load.call_args.kwargs["depth"] == depth
-    assert load.call_args.kwargs["compile"] is compile
-    assert load.call_args.kwargs["sampling"].max_new_tokens == 256
+    engine.get_consumer('round1')
+    assert load.call_args.kwargs['depth'] == depth
+    assert load.call_args.kwargs['compile'] is compile
+    assert load.call_args.kwargs['sampling'].max_new_tokens == 256
     assert engine.settings.depth == depth
 
 
 def test_sampling_reaches_original_generation_configs(payload, tmp_path, adapter, monkeypatch):
     # Optional with the lightweight test group; exercises the real consumer hook
     # when inference dependencies are installed, without loading weights or a GPU.
-    pytest.importorskip("torch")
+    pytest.importorskip('torch')
     from pathlib import Path
     from types import MethodType
 
     from soul_voice import Sampling, VoiceConsumer
 
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "third_party/breeze-tts"))
-    consumer = adapter.get_consumer("round1")
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / 'third_party/breeze-tts'))
+    consumer = adapter.get_consumer('round1')
     consumer.sampling = Sampling()
     consumer.model = SimpleNamespace(
         generation_config=SimpleNamespace(),
@@ -166,14 +165,14 @@ def test_sampling_reaches_original_generation_configs(payload, tmp_path, adapter
         return [np.zeros(24, dtype=np.float32)]
 
     consumer.synthesize.side_effect = synthesize
-    payload["voice_config"].update(
+    payload['voice_config'].update(
         temperature=0.6, top_k=0, depth_temperature=0.7, depth_top_k=25, guidance_scale=1.0, max_new_tokens=64
     )
-    metadata = adapter.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
+    metadata = adapter(None, tmp_path / 'audio.wav', config=(Payload.model_validate(payload)).voice_config)
     backbone, depth, active = snapshots[0]
-    assert (backbone["temperature"], backbone["top_k"], backbone["max_new_tokens"]) == (0.6, 0, 64)
-    assert (depth["temperature"], depth["top_k"]) == (0.7, 25)
-    assert active["guidance_scale"] == 1.0
-    assert metadata["sampling"] == active
+    assert (backbone['temperature'], backbone['top_k'], backbone['max_new_tokens']) == (0.6, 0, 64)
+    assert (depth['temperature'], depth['top_k']) == (0.7, 25)
+    assert active['guidance_scale'] == 1.0
+    assert metadata['sampling'] == active
     assert consumer.model.generation_config.temperature == Sampling().temperature
     assert consumer.model.depth_decoder.generation_config.top_k == Sampling().depth_top_k

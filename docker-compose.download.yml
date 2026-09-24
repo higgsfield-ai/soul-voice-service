@@ -1,0 +1,9 @@
+services:
+  download:
+    build: .
+    image: soul-voice:local
+    command: python -m src.utils.download
+    volumes:
+      - '${VOICE_MODELS_HOST_DIR:-./checkpoints}:/app/checkpoints'
+    env_file:
+      - .env

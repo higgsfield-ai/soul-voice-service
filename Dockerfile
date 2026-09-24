@@ -16,8 +16,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python
 COPY README.md ./
 COPY soul_voice ./soul_voice
-COPY voice_service ./voice_service
+COPY src ./src
 COPY third_party ./third_party
-COPY models.json ./
 RUN uv sync --frozen --no-dev --python /usr/local/bin/python
-CMD ["python", "-m", "voice_service", "worker"]
+CMD ["python", "-m", "src.main"]
