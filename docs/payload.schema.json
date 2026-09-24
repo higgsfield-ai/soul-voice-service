@@ -25,6 +25,16 @@
           "title": "Mode",
           "type": "string"
         },
+        "checkpoint": {
+          "default": "round1",
+          "enum": [
+            "base",
+            "raft",
+            "round1"
+          ],
+          "title": "Checkpoint",
+          "type": "string"
+        },
         "seed": {
           "default": 0,
           "maximum": 4294967295,

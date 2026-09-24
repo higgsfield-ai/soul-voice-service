@@ -12,7 +12,7 @@ class Settings:
     queue_url: str = ""
     region: str = "eu-north-1"
     visibility_timeout: int = 300
-    bundle: Path = Path("checkpoints/round1")
+    checkpoints_dir: Path = Path("checkpoints")
     source_dir: Path = Path("third_party/breeze-tts")
     device: str = "cuda:0"
     depth: str = "fused"
@@ -40,7 +40,7 @@ class Settings:
             queue_url=os.getenv("SQS_QUEUE_URL", ""),
             region=os.getenv("SQS_REGION", os.getenv("AWS_REGION", "eu-north-1")),
             visibility_timeout=int(os.getenv("SQS_VISIBILITY_TIMEOUT", "300")),
-            bundle=Path(os.getenv("VOICE_BUNDLE", "checkpoints/round1")),
+            checkpoints_dir=Path(os.getenv("VOICE_CHECKPOINT_DIR", "checkpoints")),
             source_dir=Path(os.getenv("BREEZE_SOURCE_DIR", "third_party/breeze-tts")),
             device=os.getenv("VOICE_DEVICE", "cuda:0"),
             depth=os.getenv("VOICE_DEPTH", "fused"),

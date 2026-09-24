@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 NonEmpty = Annotated[str, Field(min_length=1)]
 S3Pair = tuple[NonEmpty, NonEmpty]
+Checkpoint = Literal["base", "raft", "round1"]
 
 
 class VoiceConfig(BaseModel):
@@ -14,6 +15,7 @@ class VoiceConfig(BaseModel):
     text: Annotated[str, Field(min_length=1, max_length=16000)]
     instruction: Annotated[str, Field(min_length=1, max_length=4000)]
     mode: Literal["design", "clone", "direction"] = "design"
+    checkpoint: Checkpoint = "round1"
     seed: int = Field(default=0, ge=0, le=2**32 - 1)
     style_mix_alpha: float = Field(default=1.0, ge=0, le=1)
 

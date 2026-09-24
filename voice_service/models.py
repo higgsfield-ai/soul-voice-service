@@ -6,13 +6,15 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
-from typing import Literal
+from typing import Literal, get_args
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, model_validator
+
+from .schema import Checkpoint
 
 
 class ModelFile(BaseModel):
@@ -36,7 +38,7 @@ class ModelFile(BaseModel):
 
 class Manifest(BaseModel):
     schema_version: Literal[1] = 1
-    model_version: str
+    model_versions: dict[Checkpoint, str]
     prefix: str
     files: list[ModelFile] = Field(min_length=1)
 
@@ -68,16 +70,20 @@ def matches(path: Path, item: ModelFile) -> bool:
     return path.is_file() and path.stat().st_size == item.size and sha256(path) == item.sha256
 
 
-def inventory(root: Path, bundle: str = "round1") -> Manifest:
+def inventory(root: Path) -> Manifest:
     """Keep manifests' ../shared references valid when the tree is relocated."""
-    bundle_path = local_path(root, bundle)
-    bundle_manifest = json.loads((bundle_path / "manifest.json").read_text())
-    directories = {bundle_path}
-    for key in ("backbone", "base_checkpoint"):
-        path = (bundle_path / bundle_manifest[key]).resolve()
-        if not path.is_relative_to(root.resolve()) or not path.is_dir():
-            raise ValueError(f"{key} must point to an existing directory inside checkpoints")
-        directories.add(path)
+    directories = set()
+    versions = {}
+    for bundle in get_args(Checkpoint):
+        bundle_path = local_path(root, bundle)
+        bundle_manifest = json.loads((bundle_path / "manifest.json").read_text())
+        versions[bundle] = bundle_manifest["version"]
+        directories.add(bundle_path)
+        for key in ("backbone", "base_checkpoint"):
+            path = (bundle_path / bundle_manifest[key]).resolve()
+            if not path.is_relative_to(root.resolve()) or not path.is_dir():
+                raise ValueError(f"{key} must point to an existing directory inside checkpoints")
+            directories.add(path)
     files = []
     for directory in sorted(directories):
         for path in sorted(directory.rglob("*")):
@@ -91,9 +97,7 @@ def inventory(root: Path, bundle: str = "round1") -> Manifest:
     release = hashlib.sha256(
         json.dumps([f.model_dump() for f in files], sort_keys=True).encode()
     ).hexdigest()[:16]
-    return Manifest(
-        model_version=bundle_manifest["version"], prefix=f"models/soul-voice/{bundle}/{release}", files=files
-    )
+    return Manifest(model_versions=versions, prefix=f"models/soul-voice/{release}", files=files)
 
 
 def verify(manifest: Manifest, root: Path):
@@ -149,17 +153,12 @@ def publish(client, bucket: str, manifest: Manifest, root: Path):
     )
 
 
-def r2_client():
-    names = ("R2_ENDPOINT_URL", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET")
-    missing = [name for name in names if not os.getenv(name)]
-    if missing:
-        raise ValueError("Missing " + ", ".join(missing))
+def model_client():
+    if not os.getenv("S3_MODEL_BUCKET"):
+        raise ValueError("Missing S3_MODEL_BUCKET")
     return boto3.client(
         "s3",
-        endpoint_url=os.environ["R2_ENDPOINT_URL"],
-        region_name="auto",
-        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        region_name=os.getenv("S3_MODEL_REGION", os.getenv("AWS_REGION", "eu-north-1")),
         config=Config(signature_version="s3v4", retries={"mode": "standard", "max_attempts": 3}),
     )
 
@@ -169,20 +168,19 @@ def main():
     parser.add_argument("command", choices=["inventory", "verify", "publish", "download"])
     parser.add_argument("--root", type=Path, default=Path("checkpoints"))
     parser.add_argument("--manifest", type=Path, default=Path("models.json"))
-    parser.add_argument("--bundle", default="round1", help="used only when generating an inventory")
     args = parser.parse_args()
     load_dotenv()
     if args.command == "inventory":
-        manifest = inventory(args.root.resolve(), args.bundle)
+        manifest = inventory(args.root.resolve())
         args.manifest.write_text(manifest.model_dump_json(indent=2) + "\n")
     else:
         manifest = Manifest.model_validate_json(args.manifest.read_text())
         if args.command == "verify":
             verify(manifest, args.root)
         else:
-            client = r2_client()
+            client = model_client()
             action = publish if args.command == "publish" else download
-            action(client, os.environ["R2_BUCKET"], manifest, args.root)
+            action(client, os.environ["S3_MODEL_BUCKET"], manifest, args.root)
     print(f"{args.command}: {len(manifest.files)} files, {sum(f.size for f in manifest.files):,} bytes")
 
 

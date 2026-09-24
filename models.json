@@ -1,8 +1,82 @@
 {
   "schema_version": 1,
-  "model_version": "breeze-voice-1.0-v5-phase3-step2000+raft-round0-step128+grpo-round1-step120",
-  "prefix": "models/soul-voice/round1/1548fd9a9f475ffb",
+  "model_versions": {
+    "base": "breeze-voice-1.0-v5-phase3-step2000",
+    "raft": "breeze-voice-1.0-v5-phase3-step2000+raft-round0-step128",
+    "round1": "breeze-voice-1.0-v5-phase3-step2000+raft-round0-step128+grpo-round1-step120"
+  },
+  "prefix": "models/soul-voice/eb13a103470bdb26",
   "files": [
+    {
+      "path": "base/instruction_projector.json",
+      "size": 305,
+      "sha256": "16b69383f56d2ff8877732624e91c40ca79ac44ccb8b3290bbbaf0b621e536b1"
+    },
+    {
+      "path": "base/instruction_projector.pt",
+      "size": 66214798,
+      "sha256": "36d4df28fbe781376102ed27c4162cf0dc54d6e87186720de426851537ed3d9c"
+    },
+    {
+      "path": "base/manifest.json",
+      "size": 528,
+      "sha256": "47916a597e9821fdb49d9a83426b0bbc26819cb2f8b9729a1889b2a3abdc0127"
+    },
+    {
+      "path": "base/voice_conditioner.json",
+      "size": 1227,
+      "sha256": "affbd25739601ebefe8587ba76ebce6bef681cca8b92605947577f0052151b96"
+    },
+    {
+      "path": "base/voice_conditioner.pt",
+      "size": 464692523,
+      "sha256": "0f7bf4b20e1f44e00f3459639df6e8b705860c9398216fedd78b2cdff380fd51"
+    },
+    {
+      "path": "base/voice_encoder/voice_encoder.json",
+      "size": 435,
+      "sha256": "6a1c2d4562bde4985ec7b0c4f49e4a766d6e1b1957649fdf6bcafb225c4cc45f"
+    },
+    {
+      "path": "base/voice_encoder/voice_encoder.pt",
+      "size": 188659015,
+      "sha256": "56db4511206eb6520d370560814f76a03584a732dfc790dbf9115724bb5d0531"
+    },
+    {
+      "path": "raft/instruction_projector.json",
+      "size": 304,
+      "sha256": "019431d0dcadab0598827ec01574c05ae68e82d7a6b86eb2cc2a640720188641"
+    },
+    {
+      "path": "raft/instruction_projector.pt",
+      "size": 66214798,
+      "sha256": "40b59a83ea851968cbdb531379882910cb797a48045bc6206fb891fcaff45569"
+    },
+    {
+      "path": "raft/manifest.json",
+      "size": 642,
+      "sha256": "3156ac877910072e200ab4e5e7409f56dc099c7fc8135915c0441da19d15a1a1"
+    },
+    {
+      "path": "raft/voice_conditioner.json",
+      "size": 1226,
+      "sha256": "8b0eb55563dd15ec6e26a4c477884ceecaf02717f3cd9dfd895e8a76a60b5d4b"
+    },
+    {
+      "path": "raft/voice_conditioner.pt",
+      "size": 464692523,
+      "sha256": "3f9824e1cff723382de9a25514aaef8385ddc13424e8aa9bb73e14916faba72b"
+    },
+    {
+      "path": "raft/voice_encoder/voice_encoder.json",
+      "size": 434,
+      "sha256": "ab78347a8e8be4562f9ab3af35aa8b0864f697c274b415c590846e4446fb0bcc"
+    },
+    {
+      "path": "raft/voice_encoder/voice_encoder.pt",
+      "size": 188659015,
+      "sha256": "bdaeadbb0439057aa34c5b46478c5be6ad928a5743b49ec1c077433ab0568e0b"
+    },
     {
       "path": "round1/instruction_projector.json",
       "size": 285,

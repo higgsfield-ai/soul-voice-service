@@ -12,7 +12,8 @@ Breeze's HTTP server, and it has no dependency on the mask service repository.
 ## Request contract
 
 Send a JSON message to the worker's `SQS_QUEUE_URL`. The backend consumes the
-queue specified by `result_queue_url`. These are separate queues.
+queue specified by `result_queue_url`. These are separate queues. The development
+queues are `local-soul-voice` (requests) and `local-soul-voice-result` (results).
 
 ```json
 {
@@ -20,12 +21,13 @@ queue specified by `result_queue_url`. These are separate queues.
   "task_type": "voice",
   "s3_region": "eu-north-1",
   "sqs_region": "eu-north-1",
-  "result_queue_url": "https://sqs.eu-north-1.amazonaws.com/ACCOUNT_ID/voice-results",
+  "result_queue_url": "https://sqs.eu-north-1.amazonaws.com/ACCOUNT_ID/local-soul-voice-result",
   "dst_bucket_audio_pair": ["YOUR_MEDIA_BUCKET", "voice-tests/design/audio.wav"],
   "voice_config": {
     "text": "We go live in thirty seconds.",
     "instruction": "A warm, calm female voice, speaking clearly and unhurriedly.",
     "mode": "design",
+    "checkpoint": "round1",
     "seed": 4242,
     "style_mix_alpha": 1.0
   }
@@ -36,6 +38,7 @@ queue specified by `result_queue_url`. These are separate queues.
 | --- | --- |
 | `voice_config.text` | Words to speak; required, up to 16,000 characters. |
 | `voice_config.instruction` | Description of the voice and delivery; required in every mode, up to 4,000 characters. |
+| `voice_config.checkpoint` | `base`, `raft`, or `round1` (default); selects the training version for this job. |
 | `voice_config.mode` | `design` (default), `clone`, or `direction`. |
 | `voice_config.seed` | Random seed, 0 through 2³²−1; default 0. |
 | `voice_config.style_mix_alpha` | For direction: 0 uses reference delivery, 1 uses instructed delivery, intermediate values blend. Default 1; ignored by clone/design. |
@@ -105,7 +108,7 @@ A completion message has this shape (abbreviated):
     "gpu_provider": "nebius",
     "gpu_type": "NVIDIA H100 80GB HBM3",
     "gpu_count": 1,
-    "queue_url": "https://sqs.eu-north-1.amazonaws.com/ACCOUNT_ID/voice-requests",
+    "queue_url": "https://sqs.eu-north-1.amazonaws.com/ACCOUNT_ID/local-soul-voice",
     "retry_count": 0,
     "instance_name": "voice-worker-1",
     "real_inference_time": 12.3,
@@ -126,11 +129,10 @@ worker `meta`. It does not claim output URLs are complete.
 
 ## Models and Breeze
 
-The default bundle is the supplied **round1** checkpoint. `models.json` inventories
-its files and the shared Breeze backbone, text tokenizer and Qwen audio codec,
-including sizes and SHA-256 checksums. The older `base` and `raft` bundles remain
-available locally but are not needed by this default service. Model weights and
-credentials are excluded from Git and Docker build contexts.
+The payload selects a checkpoint through `voice_config.checkpoint`; omitted values
+use **round1**. `models.json` inventories all three supplied bundles and their shared
+Breeze backbone, text tokenizer and Qwen audio codec, with sizes and SHA-256 checksums.
+Model weights and credentials are excluded from Git and Docker build contexts.
 
 A bundle is a saved training version of the voice-conditioning components, not a
 different task. All three supplied bundles can serve design, clone and direction:
@@ -141,12 +143,17 @@ different task. All three supplied bundles can serve design, clone and direction
 | `raft` | RAFT round-0 refinement of `base`, step 128. |
 | `round1` | GRPO round-1 refinement of `raft`, step 120; the service default. |
 
-They share `shared/backbone` and `shared/base_checkpoint` (tokenizer and codec).
-Set `VOICE_BUNDLE=checkpoints/raft`, for example, to select another supplied version
-when starting the worker. This requires that bundle's files to be provisioned too:
-changing the environment variable alone does not change `models.json` or download
-additional weights. The current inventory provisions `round1` and its shared
-dependencies. Bundle selection applies to the worker, not individual jobs.
+They share `shared/backbone` and `shared/base_checkpoint` (tokenizer and codec) on
+disk. Set `"checkpoint": "raft"`, for example, alongside `mode` in `voice_config`.
+The same worker can process requests for different checkpoints without restarting.
+It loads and verifies each checkpoint on first use, then caches that consumer for
+later jobs. The first request for each checkpoint therefore includes loading time.
+Each cached consumer owns a complete model stack on the GPU; using all three
+versions retains three stacks in memory. Inference calls remain sequential.
+
+`VOICE_CHECKPOINT_DIR` locates the checkpoint tree (default `checkpoints`); it does
+not select a version. Metadata records the selected name in `voice_config.checkpoint`
+and the supplied manifest's exact training version in `model_version`.
 
 The public Breeze inference source is vendored, unmodified, at a fixed revision
 under `third_party/breeze-tts`; see [third_party/README.md](third_party/README.md).
@@ -158,11 +165,12 @@ latents (`sample_voices=false`); optional prototype-based voice casting is not
 exposed by this request contract.
 
 Publish the supplied models **once**, from this checkout with its `checkpoints`
-folder and R2 credentials. This is an explicit operation, not part of image builds:
+folder and AWS credentials for the model bucket. This is an explicit operation,
+not part of image builds:
 
 ```bash
 cp .env.example .env
-# Fill in R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+# Fill in AWS credentials, S3_MODEL_BUCKET and S3_MODEL_REGION.
 uv sync --locked --only-group test
 uv run --no-sync python -m voice_service.models verify
 uv run --no-sync python -m voice_service.models publish
@@ -171,10 +179,10 @@ uv run --no-sync python -m voice_service.models publish
 The publisher uses the release prefix recorded in `models.json`, checks all local
 files first, skips matching remote objects, and refuses to replace conflicting
 objects. It includes Breeze and the codec; do not upload another HF copy separately.
-No model objects have been published merely by adding this service to the repo.
+The bucket must already exist; publishing does not create it.
 
-On a new machine the downloader recreates `round1/` and `shared/` beneath
-`checkpoints/`, preserving the bundle's relative paths. It verifies SHA-256,
+On a new machine the downloader recreates `base/`, `raft/`, `round1/` and `shared/`
+beneath `checkpoints/`, preserving the bundles' relative paths. It verifies SHA-256,
 reuses valid files and replaces a downloaded file atomically only after verification.
 
 ```bash
@@ -186,12 +194,21 @@ If intentionally changing model weights, regenerate and review the inventory
 before publishing the new release:
 
 ```bash
-python -m voice_service.models inventory --root checkpoints --bundle round1
+python -m voice_service.models inventory --root checkpoints
 ```
 
-R2 is for **model distribution**. Job input/output audio uses **Amazon S3** through
-the normal AWS credential chain. R2 credentials never replace the worker's AWS
-credentials. Preserve the supplied third-party model licenses; see the upstream
+Models are distributed through **Amazon S3**, using `S3_MODEL_BUCKET` (default:
+`soul-voice-service`) and `S3_MODEL_REGION`. Job audio also uses S3, with its
+bucket and keys supplied in each payload. There is no fixed job-media bucket.
+
+Model commands and the worker use the same AWS credential chain: `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and, for temporary credentials, `AWS_SESSION_TOKEN`, or an
+AWS role/profile. The selected account needs access to the model bucket, both queues
+and job media. Temporary credentials must be refreshed when they expire.
+
+Keep the model bucket private. Creating it is a one-time account setup operation;
+see [AWS bucket creation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/create-bucket-overview.html).
+Preserve the supplied third-party model licenses; see the upstream
 [Breeze weight terms](https://huggingface.co/BreezeBlue/Breeze-TTS-2/blob/main/LICENSE).
 
 ## Run on a GPU machine
@@ -203,7 +220,7 @@ Apple Silicon; the laptop path is for development/tests, not GPU synthesis.
 
 1. Copy/clone this repository to the GPU machine.
 2. Create `.env` from `.env.example`. Set AWS credentials (including session token
-   for temporary credentials), `SQS_QUEUE_URL`, and the R2 download credentials.
+   for temporary credentials), `SQS_QUEUE_URL`, `S3_MODEL_BUCKET`, and `S3_MODEL_REGION`.
    An AWS instance role can replace explicit AWS keys. `SQS_REGION` is the input
    queue's region. Never use a queue consumed by the mask worker.
 3. Publish models once as described above, or copy the already verified checkpoint
@@ -216,11 +233,12 @@ docker compose logs -f worker
 ```
 
 Compose runs the model downloader first and mounts the persistent `checkpoints`
-folder read-only in the GPU worker. The model loads once, verifies its tensors and
-conditioner wiring, and then starts polling. One process serves jobs sequentially:
-the underlying consumer mutates conditioning and RNG state per synthesis.
+folder read-only in the GPU worker. The worker starts polling and loads each selected
+checkpoint on its first job, verifying its tensors and conditioner wiring. One
+process serves jobs sequentially: the underlying consumer mutates conditioning and
+RNG state per synthesis.
 
-To use an already provisioned and verified checkpoint tree without the R2 init job:
+To use an already provisioned and verified checkpoint tree without the S3 download job:
 
 ```bash
 docker compose build worker
@@ -242,12 +260,16 @@ checkpoint. Different decoders can produce different sampled audio with the same
 seed, as described in the original inference documentation. `VOICE_COMPILE=true`
 enables the original optional compilation path; initial capture is expensive.
 `compile_requested` in metadata records the requested setting, not a guarantee that
-capture succeeded. Restart the worker after changing these environment settings.
+capture succeeded. Recreate the worker container after changing these environment settings; no image
+rebuild is needed. Checkpoint selection is per payload and requires neither.
 
 The input queue needs ReceiveMessage, DeleteMessage and ChangeMessageVisibility;
 the result queue needs SendMessage. Media access needs S3 GetObject on references
 and PutObject on outputs (plus KMS permissions if those objects use KMS). Publishing
-models needs R2 read/write; deployment downloads need read only.
+models needs S3 GetObject and PutObject on the model prefix, plus ListBucket for
+checking missing objects; deployment downloads need GetObject. Bucket creation
+requires s3:CreateBucket separately. SQS and media permissions must be granted to
+the same AWS identity used for model access.
 
 ## Delivery behavior
 
@@ -282,8 +304,9 @@ metadata, SQS status/ack order, retries, reference routing, all three modes,
 validation, float WAV preservation and atomic/checksummed model downloads. They
 are not proof of voice quality or training-pipeline parity.
 
-They also check per-job sampling overrides, restoration between jobs and decoder
-selection. With the full inference dependencies installed, an additional CPU check
+They also check per-job sampling overrides, checkpoint selection and reuse across
+all three modes, restoration between jobs, and decoder selection. Model tests cover
+all three bundles, shared-file deduplication, and the AWS model-storage client. With the full inference dependencies installed, an additional CPU check
 exercises the original consumer's sampling-configuration hook without loading
 weights. That check is skipped with the lightweight test environment.
 
@@ -303,13 +326,14 @@ instead of S3. It writes a metadata sidecar next to the WAV. The supplied resear
 parity scripts have additional training-repository dependencies described in
 [the original documentation](docs/INFERENCE.md); those are not supplied here.
 
-For a GPU check across all three modes in one process:
+For a GPU check across all three checkpoints and all three modes in one process:
 
 ```bash
 uv run --no-sync python scripts/gpu_smoke.py --reference speaker.wav
 ```
 
-This writes listening examples and compares each wrapper output sample-for-sample
+Use `--checkpoints round1` to limit that check to one version. This writes listening
+examples under checkpoint directories and compares each wrapper output sample-for-sample
 against a repeated direct call to the supplied consumer with the same parameters.
 It checks wrapper fidelity and repeatability, not perceptual quality or parity
 against the unavailable training pipeline. See [docs/VERIFICATION.md](docs/VERIFICATION.md)

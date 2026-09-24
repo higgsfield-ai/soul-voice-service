@@ -16,7 +16,7 @@ from voice_service.settings import Settings
 def test_sampling_overrides_apply_only_to_current_job(payload, tmp_path, adapter, mode):
     payload["voice_config"]["mode"] = mode
     payload["src_bucket_audio_pair"] = ["voice-test-media", "reference.wav"]
-    defaults = adapter.consumer.sampling
+    defaults = adapter.get_consumer("round1").sampling
     overrides = {
         "temperature": 0.7,
         "top_k": 30,
@@ -30,17 +30,22 @@ def test_sampling_overrides_apply_only_to_current_job(payload, tmp_path, adapter
     observed = []
 
     def synthesize(*_args, **_kwargs):
-        observed.append((asdict(adapter.consumer.sampling), adapter.consumer.applied_sampling.copy()))
+        observed.append(
+            (
+                asdict(adapter.get_consumer("round1").sampling),
+                adapter.get_consumer("round1").applied_sampling.copy(),
+            )
+        )
         return [np.zeros(24, dtype=np.float32)]
 
-    adapter.consumer.synthesize.side_effect = synthesize
+    adapter.get_consumer("round1").synthesize.side_effect = synthesize
     reference = None if mode == "design" else tmp_path / "reference.wav"
     metadata = adapter.render(Payload.model_validate(payload), reference, tmp_path / "custom.wav")
     assert observed == [(overrides, overrides)]
     assert metadata["sampling"] == overrides
     assert all(metadata["voice_config"][key] == value for key, value in overrides.items())
-    assert adapter.consumer.sampling is defaults
-    assert adapter.consumer.applied_sampling == asdict(defaults)
+    assert adapter.get_consumer("round1").sampling is defaults
+    assert adapter.get_consumer("round1").applied_sampling == asdict(defaults)
     # An ordinary request after an overridden one must still use the original defaults.
     metadata = adapter.render(original, reference, tmp_path / "default.wav")
     assert observed[-1] == (asdict(defaults), asdict(defaults))
@@ -48,17 +53,19 @@ def test_sampling_overrides_apply_only_to_current_job(payload, tmp_path, adapter
 
 
 def test_sampling_restored_after_inference_failure(payload, tmp_path, adapter):
-    defaults = adapter.consumer.sampling
+    defaults = adapter.get_consumer("round1").sampling
     payload["voice_config"].update(temperature=0.6, guidance_scale=1.0, max_new_tokens=64)
-    adapter.consumer.synthesize.side_effect = RuntimeError("synthesis failed")
+    adapter.get_consumer("round1").synthesize.side_effect = RuntimeError("synthesis failed")
     with pytest.raises(RuntimeError, match="synthesis failed"):
         adapter.render(Payload.model_validate(payload), None, tmp_path / "failed.wav")
-    assert adapter.consumer.sampling is defaults
-    assert adapter.consumer.applied_sampling == asdict(defaults)
+    assert adapter.get_consumer("round1").sampling is defaults
+    assert adapter.get_consumer("round1").applied_sampling == asdict(defaults)
 
 
 def test_partial_sampling_override_keeps_worker_defaults(payload, tmp_path, adapter):
-    adapter.consumer.sampling = replace(adapter.consumer.sampling, max_new_tokens=256)
+    adapter.get_consumer("round1").sampling = replace(
+        adapter.get_consumer("round1").sampling, max_new_tokens=256
+    )
     payload["voice_config"].update(top_k=0, depth_top_k=0)
     metadata = adapter.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
     assert metadata["sampling"] == {
@@ -72,7 +79,7 @@ def test_partial_sampling_override_keeps_worker_defaults(payload, tmp_path, adap
 
 
 def test_null_sampling_values_use_defaults(payload, tmp_path, adapter):
-    defaults = asdict(adapter.consumer.sampling)
+    defaults = asdict(adapter.get_consumer("round1").sampling)
     payload["voice_config"].update({name: None for name in defaults})
     metadata = adapter.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
     assert metadata["sampling"] == defaults
@@ -100,7 +107,7 @@ def test_invalid_sampling_values(payload, field, value):
 @pytest.mark.parametrize("depth", ["fused", "cached", "shipped"])
 @pytest.mark.parametrize("compile", [False, True])
 def test_all_decoder_options_reach_original_loader(monkeypatch, adapter, depth, compile):
-    load = Mock(return_value=adapter.consumer)
+    load = Mock(return_value=adapter.get_consumer("round1"))
     monkeypatch.setitem(
         sys.modules,
         "torch",
@@ -113,7 +120,7 @@ def test_all_decoder_options_reach_original_loader(monkeypatch, adapter, depth, 
         "soul_voice",
         SimpleNamespace(
             Request=adapter.request_type,
-            Sampling=type(adapter.consumer.sampling),
+            Sampling=type(adapter.get_consumer("round1").sampling),
             VoiceConsumer=SimpleNamespace(load=load),
         ),
     )
@@ -121,6 +128,8 @@ def test_all_decoder_options_reach_original_loader(monkeypatch, adapter, depth, 
     monkeypatch.setenv("VOICE_COMPILE", str(compile).lower())
     monkeypatch.setenv("VOICE_MAX_NEW_TOKENS", "256")
     engine = VoiceEngine(Settings.from_env())
+    load.assert_not_called()
+    engine.get_consumer("round1")
     assert load.call_args.kwargs["depth"] == depth
     assert load.call_args.kwargs["compile"] is compile
     assert load.call_args.kwargs["sampling"].max_new_tokens == 256
@@ -137,7 +146,7 @@ def test_sampling_reaches_original_generation_configs(payload, tmp_path, adapter
     from soul_voice import Sampling, VoiceConsumer
 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "third_party/breeze-tts"))
-    consumer = adapter.consumer
+    consumer = adapter.get_consumer("round1")
     consumer.sampling = Sampling()
     consumer.model = SimpleNamespace(
         generation_config=SimpleNamespace(),

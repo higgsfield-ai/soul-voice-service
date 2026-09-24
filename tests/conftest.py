@@ -39,17 +39,18 @@ def adapter():
     engine = VoiceEngine.__new__(VoiceEngine)
     engine.settings = Settings()
     engine.request_type = StubRequest
-    engine.consumer = SimpleNamespace(
+    consumer = SimpleNamespace(
         sampling=StubSampling(),
         manifest={"version": "fixture"},
         synthesize=Mock(return_value=[np.zeros(24, dtype=np.float32)]),
     )
 
     def apply_sampling():
-        engine.consumer.applied_sampling = asdict(engine.consumer.sampling)
+        consumer.applied_sampling = asdict(consumer.sampling)
 
-    engine.consumer._apply_sampling = Mock(side_effect=apply_sampling)
+    consumer._apply_sampling = Mock(side_effect=apply_sampling)
     apply_sampling()
+    engine.consumers = {"round1": consumer}
     return engine
 
 

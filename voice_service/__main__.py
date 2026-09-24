@@ -13,7 +13,7 @@ from .settings import Settings
 def main():
     parser = argparse.ArgumentParser(description="Soul Voice SQS worker and local inference")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("worker", help="load models, then consume SQS jobs")
+    commands.add_parser("worker", help="consume SQS jobs, loading checkpoints on first use")
     validate = commands.add_parser("validate", help="validate without loading models")
     validate.add_argument("payload", type=Path)
     render = commands.add_parser("render", help="render locally, without AWS")

@@ -7,7 +7,7 @@ from time import perf_counter
 import numpy as np
 import soundfile as sf
 
-from .schema import Payload
+from .schema import Checkpoint, Payload
 from .settings import Settings
 
 
@@ -22,21 +22,31 @@ class VoiceEngine:
             raise RuntimeError("Soul Voice inference requires an NVIDIA CUDA GPU")
         self.settings = settings
         self.request_type = Request
-        self.consumer = VoiceConsumer.load(
-            settings.bundle,
-            source_dir=settings.source_dir,
-            device=settings.device,
-            sampling=Sampling(max_new_tokens=settings.max_new_tokens),
-            depth=settings.depth,
-            compile=settings.compile,
-            strict=True,
-        )
+        self.consumer_type = VoiceConsumer
+        self.sampling_type = Sampling
+        self.consumers = {}
         self.gpu_type = torch.cuda.get_device_name(settings.device)
+
+    def get_consumer(self, checkpoint: Checkpoint):
+        # Jobs run sequentially. Cache only successfully loaded consumers, with
+        # separate model and conditioning state for each checkpoint.
+        if checkpoint not in self.consumers:
+            self.consumers[checkpoint] = self.consumer_type.load(
+                self.settings.checkpoints_dir / checkpoint,
+                source_dir=self.settings.source_dir,
+                device=self.settings.device,
+                sampling=self.sampling_type(max_new_tokens=self.settings.max_new_tokens),
+                depth=self.settings.depth,
+                compile=self.settings.compile,
+                strict=True,
+            )
+        return self.consumers[checkpoint]
 
     def render(self, payload: Payload, reference: Path | None, output: Path) -> dict:
         config = payload.voice_config
         values = config.model_dump()
-        previous_sampling = self.consumer.sampling
+        consumer = self.get_consumer(values.pop("checkpoint"))
+        previous_sampling = consumer.sampling
         overrides = {name: values.pop(name) for name in asdict(previous_sampling)}
         sampling = replace(
             previous_sampling, **{name: value for name, value in overrides.items() if value is not None}
@@ -45,13 +55,13 @@ class VoiceEngine:
         start = perf_counter()
         # The worker calls this sequentially. Restore both the consumer settings
         # and the backbone/depth generation configs before processing another job.
-        self.consumer.sampling = sampling
+        consumer.sampling = sampling
         try:
-            self.consumer._apply_sampling()
-            (audio,) = self.consumer.synthesize([request], batch_size=1)
+            consumer._apply_sampling()
+            (audio,) = consumer.synthesize([request], batch_size=1)
         finally:
-            self.consumer.sampling = previous_sampling
-            self.consumer._apply_sampling()
+            consumer.sampling = previous_sampling
+            consumer._apply_sampling()
         inference_seconds = perf_counter() - start
         audio = np.asarray(audio, dtype=np.float32)
         if audio.ndim != 1 or audio.size == 0 or not np.isfinite(audio).all():
@@ -62,7 +72,7 @@ class VoiceEngine:
             "schema_version": 1,
             "task_type": "voice",
             "voice_config": config.model_dump(mode="json", exclude_none=True),
-            "model_version": self.consumer.manifest["version"],
+            "model_version": consumer.manifest["version"],
             "sampling": asdict(sampling),
             "depth": self.settings.depth,
             "compile_requested": self.settings.compile,

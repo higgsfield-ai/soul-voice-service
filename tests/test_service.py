@@ -15,8 +15,9 @@ from voice_service.worker import VisibilityLease
 
 
 @pytest.mark.parametrize("mode", ["design", "clone", "direction"])
-def test_complete_round_trip(cloud, payload, mode):
-    payload["voice_config"]["mode"] = mode
+@pytest.mark.parametrize("checkpoint", ["base", "raft", "round1"])
+def test_complete_round_trip(cloud, payload, mode, checkpoint):
+    payload["voice_config"].update(mode=mode, checkpoint=checkpoint)
     if mode != "design":
         payload["src_bucket_audio_pair"] = ["voice-test-media", "input/reference.wav"]
         cloud.s3.put_object(Bucket="voice-test-media", Key="input/reference.wav", Body=b"reference-bytes")
@@ -32,6 +33,7 @@ def test_complete_round_trip(cloud, payload, mode):
     )
     assert complete["meta"]["pipeline"] == metadata
     assert metadata["voice_config"]["mode"] == mode
+    assert metadata["voice_config"]["checkpoint"] == checkpoint
     assert cloud.engine.calls[0][1] == (None if mode == "design" else b"reference-bytes")
     assert (
         cloud.s3.head_object(Bucket="voice-test-media", Key="output/voice.wav")["ContentType"] == "audio/wav"
@@ -179,13 +181,13 @@ def test_adapter_preserves_config_and_float_samples(payload, tmp_path, mode, ada
     samples = np.array([-1.2, -0.5, 0, 0.6, 1.3], dtype=np.float32)
 
     engine = adapter
-    engine.consumer.synthesize.return_value = [samples]
+    engine.get_consumer("round1").synthesize.return_value = [samples]
     reference = None if mode == "design" else Path("reference.wav")
     output = tmp_path / "audio.wav"
     metadata = engine.render(Payload.model_validate(payload), reference, output)
-    request = engine.consumer.synthesize.call_args.args[0][0]
+    request = engine.get_consumer("round1").synthesize.call_args.args[0][0]
     assert vars(request) == {
-        **Payload.model_validate(payload).voice_config.model_dump(exclude_none=True),
+        **Payload.model_validate(payload).voice_config.model_dump(exclude_none=True, exclude={"checkpoint"}),
         "reference": reference,
     }
     decoded, rate = sf.read(output, dtype="float32")
@@ -193,13 +195,13 @@ def test_adapter_preserves_config_and_float_samples(payload, tmp_path, mode, ada
     assert rate == 24000
     assert metadata["voice_config"]["style_mix_alpha"] == 0.35
     assert metadata["samples"] == len(samples)
-    assert metadata["sampling"] == asdict(engine.consumer.sampling)
+    assert metadata["sampling"] == asdict(engine.get_consumer("round1").sampling)
 
 
 @pytest.mark.parametrize("samples", [[], [float("nan")], [[0.1, 0.2]]])
 def test_adapter_rejects_broken_model_audio(payload, tmp_path, samples, adapter):
     engine = adapter
-    engine.consumer.synthesize.return_value = [samples]
+    engine.get_consumer("round1").synthesize.return_value = [samples]
     with pytest.raises(RuntimeError, match="audio"):
         engine.render(Payload.model_validate(payload), None, tmp_path / "audio.wav")
 
