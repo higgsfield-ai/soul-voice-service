@@ -68,10 +68,17 @@ credentials are not committed to the service repository.
   quality.
 - Clone and direction used the supplied synthesized `clip_01.wav` as reference.
 - Regenerated the original example's text, instruction, checkpoint and seed
-  76871. The new 10.72-second render matches direct inference on this machine,
-  but differs from the supplied 8.48-second PCM16 recording. The original clip
-  does not record all runtime and decoder settings, so it is a listening
-  reference rather than an established numerical ground truth.
+  76871. The default fused decoder produced 10.72 seconds, versus the supplied
+  8.48-second PCM16 recording.
+- Followed the original README's released-render instructions and reran that
+  exact request with `depth="shipped"`, `compile=False`, and the documented
+  sampling defaults. It produced 7.92 seconds (190,080 samples), still differing
+  from the supplied 203,520 samples. Saving as PCM16 did not resolve the mismatch.
+  The wrapper output exactly matched a separately loaded original consumer.
+  Changing the decoder alone therefore does not reproduce the historical clip;
+  the remaining cause has not been isolated. The original runtime and Breeze
+  source revision are not fully recorded. Evidence and audio are in the local
+  `original-shipped/` artifact directory.
 - Comparisons use the supplied inference package. Parity with the unavailable
   original training pipeline has not been reproduced. Voicebook casting remains
   untested because no voicebook weights were supplied.
